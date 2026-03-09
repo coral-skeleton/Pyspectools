@@ -2,10 +2,9 @@ from astroscrappy import detect_cosmics
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-#import pyraf
 import astropy.units as u
 from astropy.utils.data import download_file
-from astropy.io import fits  # We use fits to open the actual data file
+from astropy.io import fits 
 
 from astropy.utils import data
 data.conf.remote_timeout = 60
@@ -168,13 +167,12 @@ def plotpeaks(snr, sn_threshold, prom, w, ax, real, galnorm, linenames, linelist
     
     ax.plot(real[line_peaks], galnorm[line_peaks], 'rx')
 
-    # Label each peak
     used_label_boxes = []
     for i in line_peaks:
         x = real[i]
         y = galnorm[i]
     
-        # Match to line name or fallback
+       
         label = None
         for j in range(len(linelist)):
             wl = float(linelist[j])
@@ -189,15 +187,12 @@ def plotpeaks(snr, sn_threshold, prom, w, ax, real, galnorm, linenames, linelist
     return line_peaks, line_properties
         
 def is_bbox_overlapping(new_bbox, used_label_boxes):
-    """Check if new bounding box overlaps any used ones."""
     for box in used_label_boxes:
         if box.overlaps(new_bbox):
             return True
     return False
 
-# Function to try different label placements
 def place_label(ax, x, y, text, used_label_boxes):
-    """Place a label avoiding overlaps using arrow annotation."""
     offsets = [
         (0, 2e-18),     # above
         (8, 1e-18),     # up and right
@@ -219,11 +214,9 @@ def place_label(ax, x, y, text, used_label_boxes):
             va='bottom',
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1.0)
         )
-        # Draw it to get its position
         fig = ax.get_figure()
         fig.canvas.draw()
         
-        # Get label bounding box in data coords
         renderer = fig.canvas.get_renderer()
         bbox = ann.get_window_extent(renderer=renderer)
         bbox_data = bbox.transformed(ax.transData.inverted())
@@ -232,7 +225,6 @@ def place_label(ax, x, y, text, used_label_boxes):
             used_label_boxes.append(bbox_data)
             return
 
-        # If overlap, remove this attempt and try next
         ann.remove()
         
 def dogauss(real, galnorm, line_peaks):
@@ -242,16 +234,14 @@ def dogauss(real, galnorm, line_peaks):
         x0 = real[i]
         y0 = galnorm[i]
     
-        # Define fitting window: ±10 Å around the peak
         window = 10
         mask = (real > x0 - window) & (real < x0 + window)
         x_fit = real[mask]
         y_fit = galnorm[mask]
 
-        # Initial guess: amp, center, sigma, offset
         amp_guess = y0
         cen_guess = x0
-        sigma_guess = 3.0  # Å — typical for SALT
+        sigma_guess = 3.0 
         offset_guess = np.median(y_fit[:3])
 
         try:
@@ -269,11 +259,10 @@ def dogauss(real, galnorm, line_peaks):
                 'center': cen,
                 'sigma': sigma,
                 'fwhm': 2.355 * sigma,
-                'flux': amp * sigma * np.sqrt(2 * np.pi),  # area under Gaussian
+                'flux': amp * sigma * np.sqrt(2 * np.pi), 
                 'offset': offset
             })
 
-            # Optional: plot fit
             x_dense = np.linspace(x_fit[0], x_fit[-1], 300)
             plt.plot(x_dense, gaussian(x_dense, *popt), 'r', alpha=0.5)
 
@@ -292,7 +281,6 @@ def dogauss(real, galnorm, line_peaks):
         amp1, cen1, sigma, amp2, offset = popt
         cen2 = cen1 + 14.4
 
-        # Plot the fit
         x_dense = np.linspace(x_fit[0], x_fit[-1], 300)
         plt.plot(x_dense, sii_doublet_with_offset(x_dense, *popt), 'k--')
 
@@ -330,7 +318,7 @@ def gaussian(x, amp, cen, sigma, offset):
     return amp * np.exp(-(x - cen)**2 / (2 * sigma**2)) + offset
 
 def sii_doublet(x, amp1, cen1, sigma, amp2):
-    cen2 = cen1 + 14.4  # separation in Å between 6716 and 6731
+    cen2 = cen1 + 14.4  
     g1 = amp1 * np.exp(-(x - cen1)**2 / (2 * sigma**2))
     g2 = amp2 * np.exp(-(x - cen2)**2 / (2 * sigma**2))
     return g1 + g2
@@ -340,8 +328,8 @@ def sii_doublet_with_offset(x, amp1, cen1, sigma, amp2, offset):
     return sii_doublet(x, amp1, cen1, sigma, amp2) + offset
 
 def ha_nii_triplet(x, amp_ha, cen_ha, sigma, amp_nii_6548, offset):
-    cen_nii_6548 = cen_ha - 15.0  # Hα = 6563, [N II] 6548 = -15 Å
-    cen_nii_6583 = cen_ha + 20.0  # [N II] 6583 = +20 Å
+    cen_nii_6548 = cen_ha - 15.0
+    cen_nii_6583 = cen_ha + 20.0  
     amp_nii_6583 = 3 * amp_nii_6548
 
     g_ha = amp_ha * np.exp(-(x - cen_ha)**2 / (2 * sigma**2))
