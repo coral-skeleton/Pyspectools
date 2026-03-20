@@ -42,21 +42,31 @@ expected_lines = {
     'HeI_7065': 7065,
 }
 
+def get_wavelength(hdr):
+    import numpy as np
+    naxis1 = hdr['NAXIS1']
+    crval1 = hdr['CRVAL1']
+    cdelt1 = hdr.get('CDELT1', hdr.get('CD1_1'))
+    crpix1 = hdr.get('CRPIX1', 1)
+    
+    pixels = np.arange(1, naxis1 + 1)
+    return crval1 + (pixels - crpix1) * cdelt1
+
 def chipfill(data, refspec): #interpolating over the chip gap in 2d rss image, data and refspec are numpy arrays containing images
     
     chip_fill= np.copy(data)
     x,y = data.shape
-    l = np.arrange(0,y,num=y)
+    l = np.linspace(0,y,num=y)
     for i in range(0,x):        
-        m, c = np.polyfit(real, data[i,:], 1)
-        y = m*l + c
-        for j in range(0,len(refspec[0,10:y+10])):
+        m, c = np.polyfit(l, data[i,:], 1)
+        y2 = m*l + c
+        for j in range(0,len(refspec[0,10:y-10])):
             if refspec[i,(j+10)] <= 1:
-                chip_fill[i,(j+10)] = y[(j+10)]
-                chip_fill[i,(j+10)+1] = y[(j+10)+1]
-                chip_fill[i,(j+10)-1] = y[(j+10)-1]
-                chip_fill[i,(j+10)+2] = y[(j+10)+2]
-                chip_fill[i,(j+10)-2] = y[(j+10)-2]
+                chip_fill[i,(j+10)] = y2[(j+10)]
+                chip_fill[i,(j+10)+1] = y2[(j+10)+1]
+                chip_fill[i,(j+10)-1] = y2[(j+10)-1]
+                chip_fill[i,(j+10)+2] = y2[(j+10)+2]
+                chip_fill[i,(j+10)-2] = y2[(j+10)-2]
                 
     return chip_fill
 
@@ -119,7 +129,7 @@ def stdskysubifu(data, skyfib = [4,22,30,31,40,52,64,77,91,104,117,132,155,167,1
 
 def getskyrows(data): #autodetection of longslit sky rows, doesnt care about object trace
     
-    nedge=30 
+    nedge=100 
     sigma=3
     
     n_spatial, _ = data.shape
@@ -209,7 +219,7 @@ def stdskysubls(data): #standard skysub routine that mirrors iraf sky subtractio
 
     skysub = line_subtracted + continuum_model
     
-    return skysub, sky_model
+    return skysub, sky_model, line_subtracted
 
 def maskspectrum(data, l, minl, maxl, w=10): #spectral masking, l is redshift corrected spectral range, lmin and lmax is min and max of wavelenght range, only works for wavelenght range between 3500-7100A
     
@@ -230,18 +240,18 @@ def maskspectrum(data, l, minl, maxl, w=10): #spectral masking, l is redshift co
 def contsub(data): #continuum subtraction
     
     x,y = data.shape
-    wl = np.rouind(2*(y/3))
+    wl = np.round(2*(y/3))
     if wl%2 == 0:
         wl += 1
-    continuum = savgol_filter(data, window_length=wl, polyorder=4)
+    continuum = savgol_filter(data, window_length=int(wl), polyorder=4)
     cent = data-continuum
     
     return cent, continuum
 
-def pca(data,l,lmin,lmax): #singular value decomp of data
+def pca(data,l,lmin,lmax,w=10): #singular value decomp of data
     
     
-    masked = maskspectrum(data,l)
+    masked = maskspectrum(data,l,lmin,lmax,w)
     
     U, S, Vt = np.linalg.svd(masked, full_matrices=False)
     
@@ -252,15 +262,16 @@ def pca(data,l,lmin,lmax): #singular value decomp of data
 def idpcacomps(data,l,lmin,lmax): #plot first components for user identification of which to use
     
     x,y = data.shape
-    n = np.round(x/2)
+    n = int(np.round(x/2))
+    avg = np.max(data)
     U,S,Vt = pca(data,l,lmin,lmax)
     fig = plt.figure(figsize = (30,8))
     cent, continuum = contsub(data)
-    plt.plot(real,cent[n,:]-0.2,label='data')    
+    plt.plot(l,(cent[n,:]/avg)-0.2,label='data')    
 
 
     for k in range(12):
-        plt.plot(real, Vt[k]+0.2*k,label='component '+str(k))
+        plt.plot(l, Vt[k]+0.2*k,label='component '+str(k))
     
     plt.legend(fontsize=12, ncol = 13)
     plt.title('Component spectra')
@@ -274,15 +285,15 @@ def idpcacomps(data,l,lmin,lmax): #plot first components for user identification
     plt.ylabel("Fraction of Variance")
     plt.title("Variance of components")
 
-def pcaskysub(data,l,lmin,lmax,nsky = [1,2,3,4,5]): #actual pca skysub routine
+def pcaskysub(data,l,lmin,lmax,w=10,nsky = [0,1,2,3,4,5]): #actual pca skysub routine
     
-    U,S,Vt = pca(data,l,lmin,lmax)
+    U,S,Vt = pca(data,l,lmin,lmax,w)
     sky_model = np.zeros_like(data)
 
     for k in nsky:
         sky_model += np.outer(U[:,k] * S[k], Vt[k])
     
-    sci_sub = data - sky_model
+    skysub = data - sky_model
     
     return sky_model, skysub
 
