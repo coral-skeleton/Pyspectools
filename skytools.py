@@ -9,6 +9,12 @@ from scipy.interpolate import griddata
 from scipy.spatial import cKDTree
 from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter1d
+from astropy.coordinates import EarthLocation
+from astropy.coordinates import SkyCoord
+from astropy.time import Time
+import astropy.units as u
+from astropy.wcs import wcs
+from astropy.wcs import WCS
 
 expected_lines = {
     'OII_3726': 3726,
@@ -42,6 +48,19 @@ expected_lines = {
     'HeI_7065': 7065,
 }
 
+def extcor(data,hdr,l,extinction): #extinction should be a string containing the path to your extinction.dat file (for salt, this is suth_extinct.dat)
+    
+    airmass = hdr.get('AIRMASS')
+    exptime = hdr.get('EXPTIME')
+    
+    ext_wave, k_lambda_table = np.loadtxt(extinction, unpack=True)
+    
+    k_lambda = np.interp(l, ext_wave, k_lambda_table)
+    flux = data / exptime
+    corr = data * 10**(0.4 * k_lambda * airmass)
+    
+    return corr
+
 def get_wavelength(hdr):
     import numpy as np
     naxis1 = hdr['NAXIS1']
@@ -51,6 +70,33 @@ def get_wavelength(hdr):
     
     pixels = np.arange(1, naxis1 + 1)
     return crval1 + (pixels - crpix1) * cdelt1
+
+def vcor(hdr,l):
+    
+    timeobs = hdr.get('TIME-OBS')
+    dateobs = hdr.get('DATE-OBS')
+    ra = hdr.get('RA')
+    dec = hdr.get('DEC')
+    coord = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))  # adjust if needed
+    obstime = Time(dateobs)
+    location = EarthLocation.from_geodetic(
+        lon=20.8107,   # degrees
+        lat=-32.3794,  # degrees
+        height=1837    # meters
+    )
+
+    v_corr = coord.radial_velocity_correction(
+        kind='heliocentric',
+        obstime=obstime,
+        location=location
+    )
+
+    v_corr = v_corr.to(u.km/u.s).value
+    c = 299792.458  # km/s
+    
+    lcorr = l * (1 + v_corr / c)
+    
+    return lcorr
 
 def chipfill(data, refspec): #interpolating over the chip gap in 2d rss image, data and refspec are numpy arrays containing images
     
@@ -127,9 +173,9 @@ def stdskysubifu(data, skyfib = [4,22,30,31,40,52,64,77,91,104,117,132,155,167,1
     return skysub, sky_model
 
 
-def getskyrows(data): #autodetection of longslit sky rows, doesnt care about object trace
+def getskyrows(data,n = 100): #autodetection of longslit sky rows, doesnt care about object trace
     
-    nedge=100 
+    nedge=n
     sigma=3
     
     n_spatial, _ = data.shape
@@ -179,9 +225,9 @@ def getskyrows_auto(data, sigma=3, smooth=3, padding=5): #automatic detection of
 
     return skyrows
 
-def simpleskysubls(data): #simple skysub for longslit
+def simpleskysubls(data, n = 100): #simple skysub for longslit
     
-    skyrows = getskyrows(data)
+    skyrows = getskyrows(data, n)
     
     sky_spectra = data[skyrows]
 
