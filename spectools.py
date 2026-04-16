@@ -2,9 +2,10 @@ from astroscrappy import detect_cosmics
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+#import pyraf
 import astropy.units as u
 from astropy.utils.data import download_file
-from astropy.io import fits 
+from astropy.io import fits  # We use fits to open the actual data file
 
 from astropy.utils import data
 data.conf.remote_timeout = 60
@@ -19,28 +20,91 @@ from scipy.optimize import curve_fit
 import matplotlib.patches as patches
 from matplotlib.transforms import Bbox
 
+expected_lines = {
+    'OII_3726': 3726,
+    'OII_3729': 3729,
+    'NeIII_3869': 3869,
+    'CaH': 3934,
+    'CaK': 3968,
+    'NeIII_3967': 3967,
+    'Hδ': 4101,
+    'Hγ': 4340,
+    'Hb': 4861.333,
+    'OIII_4959': 4958.911,
+    'OIII_5007': 5006.843,
+    'Mgb':5175,
+    'NI_5198': 5198,
+    'NI_5200': 5200,
+    'Fe_5270': 5270,
+    'Fe_5335': 5335,
+    'HeI_5876': 5876,
+    'NaD_5890': 5890,
+    'NaD_5896': 5896,
+    'OI_6300': 6300,
+    'OI_6363': 6363,
+    'SIII': 6312, 
+    'NII_6548': 6548.05,
+    'Ha': 6562.819,
+    'NII_6583': 6583.46,
+    'HeI_6678': 6678,
+    'SII_6716': 6716.44,
+    'SII_6731': 6730.81,
+    'HeI_7065': 7065,
+}
+
+
+def getz(data,l):
+    
+    if l[0] > l[-1]:
+        l = l[::-1]
+        data = data[:, ::-1]
+
+    # Pick central row
+    mid_row = data.shape[0] // 2
+    spectrum = data[mid_row]
+
+    # --- Hα search ---
+    ha_rest = 6562.8
+
+    # Define search window (adjust if needed!)
+    window = 500  # Å
+    mask = (l > ha_rest - window) & (l < ha_rest + window)
+
+    wave_sub = l[mask]
+    spec_sub = spectrum[mask]
+
+    # Find peak (simple max)
+    peak_idx = np.argmax(spec_sub)
+    ha_obs = wave_sub[peak_idx]
+
+    # Compute redshift
+    z = (ha_obs - ha_rest) / ha_rest
+
+    return z
+
 
 def normz(gal, sigma, l, expected_lines, Ha = 6562.819, knownz = False, z = 0):
     
     m, c = np.polyfit(l, gal, 1)
     y2 = m*l + c
     gal2 = np.copy(gal)
+    
 
-    for i in range(len(l)):
-        if (l[i] < 5840 and l[i] > 5775) or (l[i] > 6817 and l[i] < 6880):
-            gal2[i] = y2[i]
-        if (gal[i] <= 1e-18):
-            gal2[i] = y2[i]
-            if (l[i] > 7500):
-                for j in range(2):
-                    gal2[i-(1+j)] = y2[i-(1+j)]
-            else:
-                for j in range(2):
-                    gal2[i+(1+j)] = y2[i+(1+j)]
-                    gal2[i-(1+j)] = y2[i-(1+j)]
+    #for i in range(len(l)):
+     #   if (l[i] < 5840 and l[i] > 5775) or (l[i] > 6817 and l[i] < 6880):
+      #      gal2[i] = y2[i]
+       # if (gal[i] <= 1e-18):
+        #    gal2[i] = y2[i]
+         #   if (l[i] > 7500):
+          #      for j in range(2):
+           #         gal2[i-(1+j)] = y2[i-(1+j)]
+            #else:
+             #   for j in range(2):
+              #      gal2[i+(1+j)] = y2[i+(1+j)]
+               #     gal2[i-(1+j)] = y2[i-(1+j)]
                     
 
-    continuum = savgol_filter(gal2, window_length=3171, polyorder=3)
+    continuum = savgol_filter(gal2, window_length=3139, polyorder=3)
     galnorm = gal2 - continuum
                 
     rms = np.sqrt(np.mean(galnorm**2))
@@ -59,22 +123,25 @@ def normz(gal, sigma, l, expected_lines, Ha = 6562.819, knownz = False, z = 0):
                 for j in range(6):
                     sigma[i-(1+j)] = sigy[i]
 
-    contsig = savgol_filter(sigma, window_length=3171, polyorder=3)
+    contsig = savgol_filter(sigma, window_length=3139, polyorder=3)
     signorm = sigma-contsig                
      
-        
+    maxi = 0
     if knownz:
         real = l/(z+1)
     else:
         ha = 0
         hi = 0
 
-        for i in range(3172):
+        for i in range(3140):
             if galnorm[i] > hi:
                 hi = galnorm[i]
                 ha = l[i]
+                maxi = i
                 
         print(ha, Ha)
+        print(hi)
+        print(maxi)
         z = (ha - Ha)/Ha
         real = l/(z+1)
 
@@ -89,10 +156,11 @@ def normz(gal, sigma, l, expected_lines, Ha = 6562.819, knownz = False, z = 0):
 
     for i in range(len(real)):
         for j in range(len(known_lines)):
-            if (real[i] <= known_lines[j]*1.0005 and real[i] >= known_lines[j] - known_lines[j]*0.0005):
-                for k in range(exclusion_width):
-                    effective_noise[i+k] = 3*sigma[i+k]
-                    effective_noise[i-k] = 3*sigma[i-k]
+            if i < (len(real)-10):
+                if (real[i] <= known_lines[j]*1.0005 and real[i] >= known_lines[j] - known_lines[j]*0.0005):
+                    for k in range(exclusion_width):
+                        effective_noise[i+k] = 3*sigma[i+k]
+                        effective_noise[i-k] = 3*sigma[i-k]
 
     
     #effective_noise = 3*signorm
@@ -167,12 +235,13 @@ def plotpeaks(snr, sn_threshold, prom, w, ax, real, galnorm, linenames, linelist
     
     ax.plot(real[line_peaks], galnorm[line_peaks], 'rx')
 
+    # Label each peak
     used_label_boxes = []
     for i in line_peaks:
         x = real[i]
         y = galnorm[i]
     
-       
+        # Match to line name or fallback
         label = None
         for j in range(len(linelist)):
             wl = float(linelist[j])
@@ -187,12 +256,15 @@ def plotpeaks(snr, sn_threshold, prom, w, ax, real, galnorm, linenames, linelist
     return line_peaks, line_properties
         
 def is_bbox_overlapping(new_bbox, used_label_boxes):
+    """Check if new bounding box overlaps any used ones."""
     for box in used_label_boxes:
         if box.overlaps(new_bbox):
             return True
     return False
 
+# Function to try different label placements
 def place_label(ax, x, y, text, used_label_boxes):
+    """Place a label avoiding overlaps using arrow annotation."""
     offsets = [
         (0, 2e-18),     # above
         (8, 1e-18),     # up and right
@@ -214,9 +286,11 @@ def place_label(ax, x, y, text, used_label_boxes):
             va='bottom',
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1.0)
         )
+        # Draw it to get its position
         fig = ax.get_figure()
         fig.canvas.draw()
         
+        # Get label bounding box in data coords
         renderer = fig.canvas.get_renderer()
         bbox = ann.get_window_extent(renderer=renderer)
         bbox_data = bbox.transformed(ax.transData.inverted())
@@ -225,6 +299,7 @@ def place_label(ax, x, y, text, used_label_boxes):
             used_label_boxes.append(bbox_data)
             return
 
+        # If overlap, remove this attempt and try next
         ann.remove()
         
 def dogauss(real, galnorm, line_peaks):
@@ -234,14 +309,16 @@ def dogauss(real, galnorm, line_peaks):
         x0 = real[i]
         y0 = galnorm[i]
     
+        # Define fitting window: ±10 Å around the peak
         window = 10
         mask = (real > x0 - window) & (real < x0 + window)
         x_fit = real[mask]
         y_fit = galnorm[mask]
 
+        # Initial guess: amp, center, sigma, offset
         amp_guess = y0
         cen_guess = x0
-        sigma_guess = 3.0 
+        sigma_guess = 3.0  # Å — typical for SALT
         offset_guess = np.median(y_fit[:3])
 
         try:
@@ -259,10 +336,11 @@ def dogauss(real, galnorm, line_peaks):
                 'center': cen,
                 'sigma': sigma,
                 'fwhm': 2.355 * sigma,
-                'flux': amp * sigma * np.sqrt(2 * np.pi), 
+                'flux': amp * sigma * np.sqrt(2 * np.pi),  # area under Gaussian
                 'offset': offset
             })
 
+            # Optional: plot fit
             x_dense = np.linspace(x_fit[0], x_fit[-1], 300)
             plt.plot(x_dense, gaussian(x_dense, *popt), 'r', alpha=0.5)
 
@@ -281,6 +359,7 @@ def dogauss(real, galnorm, line_peaks):
         amp1, cen1, sigma, amp2, offset = popt
         cen2 = cen1 + 14.4
 
+        # Plot the fit
         x_dense = np.linspace(x_fit[0], x_fit[-1], 300)
         plt.plot(x_dense, sii_doublet_with_offset(x_dense, *popt), 'k--')
 
@@ -318,7 +397,7 @@ def gaussian(x, amp, cen, sigma, offset):
     return amp * np.exp(-(x - cen)**2 / (2 * sigma**2)) + offset
 
 def sii_doublet(x, amp1, cen1, sigma, amp2):
-    cen2 = cen1 + 14.4  
+    cen2 = cen1 + 14.4  # separation in Å between 6716 and 6731
     g1 = amp1 * np.exp(-(x - cen1)**2 / (2 * sigma**2))
     g2 = amp2 * np.exp(-(x - cen2)**2 / (2 * sigma**2))
     return g1 + g2
@@ -328,8 +407,8 @@ def sii_doublet_with_offset(x, amp1, cen1, sigma, amp2, offset):
     return sii_doublet(x, amp1, cen1, sigma, amp2) + offset
 
 def ha_nii_triplet(x, amp_ha, cen_ha, sigma, amp_nii_6548, offset):
-    cen_nii_6548 = cen_ha - 15.0
-    cen_nii_6583 = cen_ha + 20.0  
+    cen_nii_6548 = cen_ha - 15.0  # Hα = 6563, [N II] 6548 = -15 Å
+    cen_nii_6583 = cen_ha + 20.0  # [N II] 6583 = +20 Å
     amp_nii_6583 = 3 * amp_nii_6548
 
     g_ha = amp_ha * np.exp(-(x - cen_ha)**2 / (2 * sigma**2))
